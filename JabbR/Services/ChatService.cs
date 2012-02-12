@@ -811,6 +811,20 @@ namespace JabbR.Services
             _repository.CommitChanges();
         }
 
+        public void ClearMessages(ChatUser user, ChatRoom targetRoom)
+        {
+            EnsureOwner(user, targetRoom);
+
+            if (targetRoom.Closed)
+            {
+                throw new InvalidOperationException(String.Format("{0} is closed.", targetRoom.Name));
+            }
+
+            targetRoom.Messages.Clear();
+
+            _repository.CommitChanges();
+        }
+
         public void OpenRoom(ChatUser user, ChatRoom targetRoom)
         {
             EnsureOwner(user, targetRoom);

@@ -127,6 +127,11 @@ namespace JabbR.Commands
                 HandleInviteCode(user, room, forceReset: true);
                 return true;
             }
+            else if (commandName.Equals("clearmessages", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleClearMessages(user, room);
+                return true;
+            }
 
             return false;
         }
@@ -294,6 +299,16 @@ namespace JabbR.Commands
             _chatService.OpenRoom(user, room);
             // Automatically join user to newly opened room
             JoinRoom(user, room, null);
+        }
+
+        private void HandleClearMessages(ChatUser user, ChatRoom room)
+        {
+            if (room.Messages.Count > 0)
+            {
+                _chatService.ClearMessages(user, room);
+            }
+
+            _notificationService.PostNotification(room, user, String.Format("The history for this room has been reset"));
         }
 
         private void HandleInviteCode(ChatUser user, ChatRoom room, bool forceReset)

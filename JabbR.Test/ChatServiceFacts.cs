@@ -1120,6 +1120,58 @@ namespace JabbR.Test
             }
         }
 
+        public class ClearMessages
+        {
+            [Fact]
+            public void ClearsMessagesIfOwner()
+            {
+                var repository = new InMemoryRepository();
+                var user = new ChatUser
+                {
+                    Name = "foo"
+                };
+                repository.Add(user);
+                var room = new ChatRoom
+                {
+                    Name = "Room",
+                };
+                room.Users.Add(user);
+                room.Owners.Add(user);
+                room.Messages.Add(new ChatMessage());
+                user.OwnedRooms.Add(room);
+                user.Rooms.Add(room);
+
+                var service = new ChatService(repository, new Mock<ICryptoService>().Object);
+
+                service.ClearMessages(user, room);
+
+                Assert.True(room.Messages.Count == 0);
+            }
+
+            [Fact]
+            public void ThrowsIfUserIsNotOwner()
+            {
+                var repository = new InMemoryRepository();
+                var user = new ChatUser
+                {
+                    Name = "foo"
+                };
+                repository.Add(user);
+                var room = new ChatRoom
+                {
+                    Name = "Room",
+                };
+
+                user.Rooms.Add(room);
+                room.Users.Add(user);
+                room.Messages.Add(new ChatMessage());
+
+                var service = new ChatService(repository, new Mock<ICryptoService>().Object);
+
+                Assert.Throws<InvalidOperationException>(() => service.ClearMessages(user, room));
+            }
+        }
+
         public class AllowUser
         {
             [Fact]
