@@ -1,8 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.ServiceModel.Syndication;
 using System.Text;
 using System.Web;
+using System.Xml;
 using JabbR.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
@@ -38,7 +41,7 @@ namespace JabbR.Handlers
 
             if (String.IsNullOrWhiteSpace(range))
             {
-                range = "last-hour";
+                range = "last-day";
             }
 
             var end = DateTime.Now;
@@ -86,43 +89,35 @@ namespace JabbR.Handlers
             }
 
             var messages = _repository.GetMessagesByRoom(roomName)
-                .Where(msg => msg.When <= end && msg.When >= start)
-                .Select(msg => new
-                {
-                    Content = msg.Content,
-                    Username = msg.User.Name,
-                    When = msg.When
-                });
+                    .Where(msg => msg.When <= end && msg.When >= start);
 
             bool downloadFile = false;
             Boolean.TryParse(request["download"], out downloadFile);
 
-            var filenamePrefix = roomName + ".";
-
-            if (start != DateTime.MinValue)
+            if (downloadFile)
             {
-                filenamePrefix += start.ToString(FilenameDateFormat, CultureInfo.InvariantCulture) + ".";
-            }
+                var downloadFilename = roomName + ".";
 
-            filenamePrefix += end.ToString(FilenameDateFormat, CultureInfo.InvariantCulture);
+                if (start != DateTime.MinValue)
+                {
+                    downloadFilename += start.ToString(FilenameDateFormat, CultureInfo.InvariantCulture) + ".";
+                }
+
+                downloadFilename += end.ToString(FilenameDateFormat, CultureInfo.InvariantCulture) + "." + formatName;
+
+                response.Headers["Content-Disposition"] = "attachment; filename=\"" + downloadFilename + "\"";
+            }
 
             switch (formatName)
             {
                 case "json":
-                    var json = Serialize(messages);
-                    var data = Encoding.UTF8.GetBytes(json);
-
-                    response.ContentType = "application/json";
-                    response.ContentEncoding = Encoding.UTF8;
-
-                    if (downloadFile)
-                    {
-                        response.Headers["Content-Disposition"] = "attachment; filename=\"" + filenamePrefix + ".json\"";
-                    }
-
-                    response.BinaryWrite(data);
+                    WriteJsonResponse(response, messages);
+                    break;
+                case "rss":
+                    WriteRssResponse(response, room.Name, messages);
                     break;
                 default:
+                    //TODO: if the format isn't json, do you really want to send a json error message here?
                     WriteBadRequest(response, "format not supported.");
                     return;
             }
@@ -143,10 +138,49 @@ namespace JabbR.Handlers
             response.TrySkipIisCustomErrors = true;
             response.StatusCode = statusCode;
             response.StatusDescription = description;
-            response.Write(Serialize(new ClientError { Message = message }));
+            response.Write(SerializeJson(new ClientError { Message = message }));
         }
 
-        private string Serialize(object value)
+        private void WriteRssResponse(HttpResponse response, string roomName, IEnumerable<ChatMessage> messages)
+        {
+            messages = messages.OrderByDescending(msg => msg.When);
+
+            var lastUpdated = messages.Select(msg => msg.When).FirstOrDefault();
+
+            var items = messages.Select(msg => 
+            {
+                var item = new SyndicationItem
+                {
+                    PublishDate = msg.When,
+                    LastUpdatedTime = msg.When,
+                    Id = msg.Id,
+                    Content = new TextSyndicationContent(msg.Content, TextSyndicationContentKind.Html)
+                };
+
+                item.ElementExtensions.Add("creator", "http://purl.org/dc/elements/1.1/", msg.User.Name);
+
+                return item;
+            });
+
+            var feed = new SyndicationFeed(string.Format("JabbR - {0}", roomName), string.Empty, new Uri(string.Format("http://jabbr.net/#/rooms/{0}", roomName)), roomName, lastUpdated, items);
+
+            response.ContentType = "application/rss+xml";
+            response.ContentEncoding = Encoding.UTF8;
+
+            var formatter = new Rss20FeedFormatter(feed);
+
+            var settings = new XmlWriterSettings 
+            {
+                Encoding = Encoding.UTF8
+            };
+
+            using (var xml = XmlWriter.Create(response.OutputStream, settings))
+            {
+                formatter.WriteTo(xml);
+            }
+        }
+
+        private string SerializeJson(object value)
         {
             var resolver = new CamelCasePropertyNamesContractResolver();
             var settings = new JsonSerializerSettings
@@ -156,7 +190,25 @@ namespace JabbR.Handlers
 
             settings.Converters.Add(new IsoDateTimeConverter());
 
-            return JsonConvert.SerializeObject(value, Formatting.Indented, settings);
+            return JsonConvert.SerializeObject(value, Newtonsoft.Json.Formatting.Indented, settings);
+        }
+
+        private void WriteJsonResponse(HttpResponse response, IEnumerable<ChatMessage> messages)
+        {
+            var jsonMessages = messages.Select(msg => new {
+                Content = msg.Content,
+                Username = msg.User.Name,
+                When = msg.When
+            });
+
+            var json = SerializeJson(jsonMessages);
+
+            var data = Encoding.UTF8.GetBytes(json);
+
+            response.ContentType = "application/json";
+            response.ContentEncoding = Encoding.UTF8;
+
+            response.BinaryWrite(data);
         }
 
         private class ClientError
